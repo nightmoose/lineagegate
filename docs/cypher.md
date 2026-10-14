@@ -1,6 +1,6 @@
 # Cypher the agent depends on
 
-All tools live in `src/lineagegate/tools/lineage.py` and are parameterised (no string-built Cypher
+All tools live in `src/lineagegate/tools/lineage.py` and `src/lineagegate/tools/ops.py` and are parameterised (no string-built Cypher
 from the LLM). Paths are projected server-side into plain maps:
 
 ```cypher
@@ -81,4 +81,21 @@ make everything look related. `record_incident` `MERGE`s new `Incident` nodes wi
 CALL algo.pageRank('Model','DEPENDS_ON') YIELD node, score
 // or: CALL algo.betweenness({nodeLabels:['Model'], relationshipTypes:['DEPENDS_ON']}) YIELD node, score
 ```
-On the seed both rank `dim_customer` first (the planted hub).
+On the seed both rank `dim_customer` first (the planted hub). Evidence for the top asset: the shortest
+path from each dashboard down to it, so the UI can draw *why* it is critical:
+
+```cypher
+MATCH p = (d:Dashboard)-[:DISPLAYS]->(:Model)-[:DEPENDS_ON*0..8]->(m:Model {id:$id})
+RETURN d.id, pnodes, prels      // shortest kept per dashboard
+```
+
+## Guards and suggestions
+
+- **Empty graph:** every tool first runs `MATCH (n) RETURN count(n)`. On 0 it returns
+  `{found:false, empty_graph:true}` instead of misleading empty results.
+- **Unknown names:** close matches come from the graph itself (all `id` / `fqn` / `name` values, fuzzy
+  ranked), plus same-table columns. For example, `stg_ordr.amount` suggests `stg_orders.amount`.
+- **Ambiguous names:** `resolve_node` returns every exact name match. Tools return `candidates`, and the
+  agent is instructed to ask instead of picking one.
+- **No path:** tools return `found:false`. The system prompt forbids inventing nodes or paths, and a
+  live test checks that the agent abstains on an unknown column.

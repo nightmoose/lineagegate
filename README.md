@@ -2,16 +2,58 @@
 
 **An explainable agent that answers "what breaks if this changes?" from a data lineage + contracts graph in [FalkorDB](https://www.falkordb.com/).**
 
-Built for the WeMakeDevs **Graph Hacks: Context for AI Agents** hackathon, Track 01: Connected Data for AI Agents.
+**Live demo: https://lineagegate.fly.dev/** · Built for WeMakeDevs **Graph Hacks: Context for AI Agents**
 
-Data teams get asked the same questions over and over. What breaks if this column changes? Who owns this
-dashboard? Why did this job fail, and have we seen it before? The answers live in *relationships*:
-column → model → dashboard, asset → contract, asset → team → on-call person. LineageGate stores those
-relationships in FalkorDB and gives an agent a few **Cypher-backed tools**. Every answer comes with the
-**graph path** that justifies it. Without the graph, the agent has nothing to say.
+| | |
+|---|---|
+| **Tracks** | **Track 01: Connected Data for AI Agents** (primary). **Track 02** (agent memory): incidents are written back into the graph and recalled in later sessions. |
+| **Stack** | FalkorDB · Python · FastAPI · xAI Grok (OpenAI-compatible tool calling) · vis-network UI · Fly.io |
+| **Data** | Fully synthetic "Acme Analytics" warehouse: 111 nodes, 248 edges, 11 labels, 13 relationship types |
 
-> Inspired by common data-contract and lineage practices. Standalone demo on a fully synthetic
-> dataset ("Acme Analytics"). No external services required.
+### 30-second pitch
+
+Data teams keep getting asked the same questions. What breaks if this column changes? Why did last
+night's job fail, and have we seen it before? Who do I page? The answers live in *relationships*:
+column → model → dashboard, asset → contract, job → incident → incident, asset → team → on-call.
+LineageGate stores those relationships in FalkorDB and gives an LLM agent seven Cypher-backed
+tools. The agent picks the tool, FalkorDB walks the graph, and every answer cites the **graph path**
+that justifies it, drawn in the UI. When the graph has no path, the agent says so instead of guessing.
+
+### Why FalkorDB is central (not a sidebar)
+
+- **Every answer is a traversal.** Blast radius is variable-length `DEPENDS_ON*0..8` column lineage. Ownership is a multi-hop
+  `HAS_COLUMN → OWNED_BY → MEMBER_OF` walk, and triage chains `REFRESHES → DEPENDS_ON* → READS_FROM ← WRITES_TO`.
+- **Built-in algorithms do the reasoning:** `algo.SPpaths` (k shortest explanations), `algo.pageRank` and
+  `algo.betweenness` (critical assets), `shortestPath` (incident similarity by graph distance).
+- **Memory lives in the graph.** `record_incident` `MERGE`s `Incident` nodes linked by `TRIGGERED_BY`, `VIOLATED`
+  and `RELATED_TO` edges, so the next session recalls them via traversal, not a vector store.
+- Remove FalkorDB and the agent has nothing to say: the LLM only ever sees tool results.
+
+### Architecture
+
+```mermaid
+flowchart LR
+  U[Browser UI<br/>chat + evidence graph] -->|POST /chat| API[FastAPI]
+  API --> AG[Agent loop<br/>Grok tool calling<br/>offline router fallback]
+  AG -->|tool call| T[7 Cypher tools<br/>impact · owners · paths<br/>triage · incidents · record · critical]
+  T -->|parameterised Cypher + algo.*| F[(FalkorDB<br/>graph: acme)]
+  F -->|rows + projected paths| T
+  T -->|JSON with paths| AG
+  AG -->|answer + tool calls| API --> U
+```
+
+On Fly.io, FalkorDB and the app share one machine. The graph is seeded on boot if it's empty.
+
+### Quickstart (local, ~1 minute)
+
+```bash
+git clone https://github.com/nightmoose/lineagegate && cd lineagegate
+docker compose up -d                       # FalkorDB on :6379 (Browser on :3000)
+python -m venv .venv && .venv/bin/pip install -e '.[llm,api,dev]'
+.venv/bin/lineagegate seed                 # load the synthetic graph
+.venv/bin/lineagegate serve                # UI + API on http://127.0.0.1:8000
+# optional: export XAI_API_KEY=...         # without it, a deterministic offline router answers
+```
 
 ## Example
 

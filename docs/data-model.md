@@ -45,6 +45,51 @@ Every node has a unique `id` (prefixed by kind) and a `name`. Each label has an 
 
 Because all lineage edges point upstream, **impact = traverse incoming edges** from the changed node.
 
+## Schema (labels and relationship types)
+
+```mermaid
+flowchart RL
+  Source([Source])
+  Table[Table]
+  Column[Column]
+  Model[Model]
+  Dashboard[[Dashboard]]
+  Contract{{Contract}}
+  Test[/Test/]
+  Job>Job]
+  Incident((Incident))
+  Team[Team]
+  Person[Person]
+
+  Job -->|READS_FROM| Source
+  Job -->|WRITES_TO| Table
+  Job -->|REFRESHES| Model
+  Job -->|REFRESHES| Dashboard
+  Table -->|HAS_COLUMN| Column
+  Model -->|HAS_COLUMN| Column
+  Model -->|READS_FROM| Table
+  Model -->|DEPENDS_ON| Model
+  Column -->|DEPENDS_ON| Column
+  Dashboard -->|DISPLAYS| Model
+  Column -->|GOVERNED_BY| Contract
+  Model -->|GOVERNED_BY| Contract
+  Test -->|GOVERNED_BY| Contract
+  Test -->|READS_FROM| Column
+  Test -->|READS_FROM| Model
+  Incident -->|TRIGGERED_BY| Job
+  Incident -->|VIOLATED| Contract
+  Incident -->|RELATED_TO| Incident
+  Incident -->|OWNED_BY| Person
+  Model -->|OWNED_BY| Team
+  Dashboard -->|OWNED_BY| Team
+  Person -->|MEMBER_OF| Team
+```
+
+`OWNED_BY` also links Source, Table, Job, Contract and Dashboard to Team/Person (omitted above to keep the diagram readable).
+
+## Example: the `stg_orders.amount` lineage
+
+
 ```mermaid
 graph RL
   RAW[raw.shopify_orders.total_price_cents] 
@@ -71,3 +116,11 @@ graph RL
    `customers_identity`) caused `INC-0917` (same job failure, violated `dim_customer_grain`).
 3. **Hub table.** `dim_customer` is the most depended-on model (customer marts, `fct_orders`,
    marketing ROI) — candidate for PageRank / betweenness "critical asset" tooling.
+
+## Incident memory (writes)
+
+`record_incident` (agent tool, CLI `lineagegate record-incident`) adds an `Incident` node with
+`TRIGGERED_BY` → Job, `VIOLATED` → Contract, and `RELATED_TO` → its two most similar prior incidents.
+`similar_incidents` ranks by graph distance (`shortestPath` over lineage + incident edges, excluding
+ownership) plus keyword overlap, so a fresh session finds earlier incidents through the graph.
+On the hosted demo there is no volume, so recorded incidents reset to the seed on restart.
