@@ -13,12 +13,19 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from lineagegate.tools.lineage import TOOL_SPECS, TOOLS
+from lineagegate.tools import lineage, ops
+
+TOOLS = {**lineage.TOOLS, **ops.TOOLS}
+TOOL_SPECS = lineage.TOOL_SPECS + ops.TOOL_SPECS
+DEFAULT_XAI_MODEL = "grok-4.3"  # tool-calling capable; override with LLM_MODEL
 
 SYSTEM_PROMPT = """You are LineageGate, a data-reliability assistant for the Acme Analytics warehouse.
 You answer ONLY from the lineage + contracts graph stored in FalkorDB, using the tools provided.
 Rules:
-- Always call a tool before answering questions about impact, ownership, or connections.
+- Always call a tool before answering questions about impact, ownership, connections, failed jobs,
+  past incidents, or which assets are most critical. Prefer triage_failed_job for failures and
+  similar_incidents to recall prior incidents (graph memory persists across sessions).
+- Only call record_incident when the user explicitly asks to record or log an incident.
 - Cite at least one graph path verbatim (the `text` / `path` fields) as evidence.
 - Name impacted dashboards, contracts at risk, failing tests, and the owner team / on-call person.
 - If a tool returns found=false or no path, say so plainly; do not guess.
@@ -43,7 +50,7 @@ def _llm_client():
                 os.getenv("LLM_MODEL", "gpt-4o-mini"), "custom")
     if os.getenv("XAI_API_KEY"):
         return (OpenAI(api_key=os.environ["XAI_API_KEY"], base_url="https://api.x.ai/v1"),
-                os.getenv("LLM_MODEL", "grok-4"), "xai")
+                os.getenv("LLM_MODEL", DEFAULT_XAI_MODEL), "xai")
     if os.getenv("OPENAI_API_KEY"):
         return OpenAI(), os.getenv("LLM_MODEL", "gpt-4o-mini"), "openai"
     if os.getenv("ANTHROPIC_API_KEY"):  # Anthropic's OpenAI-compatible endpoint
@@ -79,7 +86,12 @@ def run_llm(question: str, max_turns: int = 6) -> AgentResult | None:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": question}]
     calls: list[dict] = []
     for _ in range(max_turns):
-        resp = client.chat.completions.create(model=model, messages=messages, tools=TOOL_SPECS)
+        try:
+            resp = client.chat.completions.create(model=model, messages=messages, tools=TOOL_SPECS,
+                                                  timeout=float(os.getenv("LLM_TIMEOUT", "90")))
+        except Exception as exc:  # network/auth/model error -> caller falls back offline
+            print(f"[llm error: {type(exc).__name__}; falling back to offline router]")
+            return None
         msg = resp.choices[0].message
         if not msg.tool_calls:
             return AgentResult(answer=msg.content or "", mode=f"llm:{provider}:{model}", tool_calls=calls)
@@ -103,6 +115,13 @@ _ID = re.compile(r"\b((?:column|model|table|dashboard|job|contract|test|person|t
 def route(question: str) -> tuple[str, dict] | None:
     q = question.lower()
     refs = _ID.findall(question) or _FQN.findall(question)
+    if any(w in q for w in ("critical", "pagerank", "central", "most important", "hub", "riskiest")):
+        return "critical_assets", {"algorithm": "betweenness" if "betweenness" in q else "pagerank"}
+    if any(w in q for w in ("fail", "triage", "broke")):
+        m = re.search(r"\b((?:dbt|ingest|refresh)_[a-z0-9_]+)", q)
+        return "triage_failed_job", {"job": m.group(1)} if m else {}
+    if any(w in q for w in ("incident", "happened before", "seen this", "similar")):
+        return "similar_incidents", {"node": refs[0]} if refs else {"text": question}
     if any(w in q for w in ("path", "connected", "connect", "between", "how does", "lead to", "reach")) and len(refs) >= 2:
         return "paths_explain", {"source": refs[0], "target": refs[1]}
     if any(w in q for w in ("who owns", "owner", "own ", "on-call", "on call", "contact")) and refs:
@@ -169,7 +188,51 @@ def render_paths(r: dict) -> str:
     return "\n".join(lines)
 
 
-RENDER = {"impact_from_column": render_impact, "owners_for_node": render_owners, "paths_explain": render_paths}
+def render_triage(r: dict) -> str:
+    if not r.get("found"):
+        return r.get("error", "not found") + (f" Failed jobs: {', '.join(r['failed_jobs'])}" if r.get("failed_jobs") else "")
+    j = r["job"]
+    lines = [f"{j['id']} is {j['status']} (last run {j['last_run_at']}): {j.get('last_error') or 'no error text'}"]
+    if r["failing_tests"]:
+        lines.append("Failing tests: " + ", ".join(f"{t['name']} on {t['on']}" for t in r["failing_tests"]))
+    if r["contracts"]:
+        lines.append("Contracts in the upstream lineage: " + "; ".join(f"{c['id']} ({c['spec']})" for c in r["contracts"]))
+    lines.append("Dashboards at risk: " + (", ".join(r["downstream_dashboards"]) or "none"))
+    for o in r["owners"]:
+        lines.append(f"Owner: {o['team']} (on-call: {', '.join(o['on_call']) or 'n/a'})")
+    if r["similar_incidents"]:
+        lines += ["", "Similar past incidents:"]
+        for i in r["similar_incidents"]:
+            lines.append(f"  {i['id']} [{i['severity']}] {i['title']} -> fix: {i['resolution']}")
+            if i.get("graph_path"):
+                lines.append(f"      via {i['graph_path']}")
+    if r["upstream_ingestion_jobs"]:
+        lines += ["", "Upstream ingestion paths:"]
+        lines += [f"  [{u['hops']} hops] {u['path']}" for u in r["upstream_ingestion_jobs"]]
+    return "\n".join(lines)
+
+
+def render_incidents(r: dict) -> str:
+    if not r.get("found"):
+        return "No similar incidents in graph memory."
+    lines = ["Similar incidents:"]
+    for i in r["incidents"]:
+        lines.append(f"  {i['id']} [{i['severity']}] score {i['score']}: {i['title']}")
+        lines.append(f"      root cause: {i['root_cause']}  fix: {i['resolution']}")
+        if i.get("graph_path"):
+            lines.append(f"      via {i['graph_path']}")
+    return "\n".join(lines)
+
+
+def render_critical(r: dict) -> str:
+    lines = [f"Most critical models by {r['algorithm']} over DEPENDS_ON:"]
+    lines += [f"  {i+1}. {a['id']} score {a['score']} - {a['downstream_models']} downstream models, "
+              f"{a['dashboards']} dashboards, owner {a['owner_team']}" for i, a in enumerate(r["assets"])]
+    return "\n".join(lines)
+
+
+RENDER = {"triage_failed_job": render_triage, "similar_incidents": render_incidents,
+          "critical_assets": render_critical, "impact_from_column": render_impact, "owners_for_node": render_owners, "paths_explain": render_paths}
 
 
 def run_offline(question: str) -> AgentResult:
@@ -177,7 +240,7 @@ def run_offline(question: str) -> AgentResult:
     if picked is None:
         return AgentResult(
             answer="Offline mode understands: impact of `table.column`, `who owns <node>`, "
-                   "or `path between <a> and <b>`. Set an LLM key for free-form questions.",
+                   "`path between <a> and <b>`, failed-job triage, similar incidents, critical assets. Set an LLM key for free-form questions.",
             mode="offline-router")
     name, args = picked
     result = _call_tool(name, args)
