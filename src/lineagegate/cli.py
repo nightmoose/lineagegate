@@ -6,6 +6,10 @@
   lineagegate impact stg_orders.amount
   lineagegate owners stg_orders.amount
   lineagegate path stg_orders.amount dashboard:finance.revenue_daily
+  lineagegate triage [job]         # failed-job triage (default: latest failure)
+  lineagegate incidents --node stg_orders.amount
+  lineagegate critical --algorithm pagerank
+  lineagegate serve               # FastAPI on :8000
   lineagegate ask "What breaks if stg_orders.amount changes?"
 """
 from __future__ import annotations
@@ -34,6 +38,14 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("owners"); p.add_argument("node"); p.add_argument("--json", action="store_true")
     p = sub.add_parser("path"); p.add_argument("source"); p.add_argument("target")
     p.add_argument("-k", type=int, default=3); p.add_argument("--json", action="store_true")
+    p = sub.add_parser("triage"); p.add_argument("job", nargs="?"); p.add_argument("--json", action="store_true")
+    p = sub.add_parser("incidents"); p.add_argument("--node"); p.add_argument("--text")
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("critical"); p.add_argument("--algorithm", default="pagerank", choices=["pagerank", "betweenness"])
+    p.add_argument("-k", type=int, default=5); p.add_argument("--json", action="store_true")
+    p = sub.add_parser("record-incident"); p.add_argument("title"); p.add_argument("--root-cause", default="")
+    p.add_argument("--severity", default="SEV3"); p.add_argument("--job"); p.add_argument("--contract", action="append")
+    p = sub.add_parser("serve"); p.add_argument("--host", default="127.0.0.1"); p.add_argument("--port", type=int, default=8000)
     p = sub.add_parser("ask"); p.add_argument("question", nargs="+")
     p.add_argument("--offline", action="store_true", help="skip the LLM even if a key is set")
     p.add_argument("--show-tools", action="store_true", help="print tool calls + args")
@@ -59,7 +71,14 @@ def main(argv: list[str] | None = None) -> int:
         _print_json(stats())
         return 0
 
-    from lineagegate.agent.loop import ask, render_impact, render_owners, render_paths
+    if args.cmd == "serve":
+        import uvicorn
+        uvicorn.run("lineagegate.api.app:app", host=args.host, port=args.port)
+        return 0
+
+    from lineagegate.agent.loop import (ask, render_critical, render_impact, render_incidents,
+                                        render_owners, render_paths, render_triage)
+    from lineagegate.tools import ops
     from lineagegate.tools.lineage import impact_from_column, owners_for_node, paths_explain
 
     if args.cmd == "impact":
@@ -74,6 +93,21 @@ def main(argv: list[str] | None = None) -> int:
         r = paths_explain(args.source, args.target, k=args.k)
         _print_json(r) if args.json else print(render_paths(r))
         return 0 if r.get("found") else 1
+    if args.cmd == "triage":
+        r = ops.triage_failed_job(args.job)
+        _print_json(r) if args.json else print(render_triage(r))
+        return 0 if r.get("found") else 1
+    if args.cmd == "incidents":
+        r = ops.similar_incidents(node=args.node, text=args.text)
+        _print_json(r) if args.json else print(render_incidents(r))
+        return 0
+    if args.cmd == "critical":
+        r = ops.critical_assets(args.algorithm, args.k)
+        _print_json(r) if args.json else print(render_critical(r))
+        return 0
+    if args.cmd == "record-incident":
+        _print_json(ops.record_incident(args.title, args.root_cause, args.severity, args.job, args.contract))
+        return 0
     if args.cmd == "ask":
         res = ask(" ".join(args.question), offline=args.offline)
         print(f"[mode: {res.mode}]")

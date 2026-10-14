@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lineagegate"
-version = "0.1.0"
+version = "0.2.0"
 description = "Explainable agent over a data lineage + contracts graph in FalkorDB"
 readme = "README.md"
 license = { text = "MIT" }
@@ -16,7 +16,8 @@ dependencies = [
 
 [project.optional-dependencies]
 llm = ["openai>=1.40"]
-dev = ["pytest>=8"]
+api = ["fastapi>=0.110", "uvicorn>=0.29"]
+dev = ["pytest>=8", "httpx>=0.27"]
 
 [project.scripts]
 lineagegate = "lineagegate.cli:main"
