@@ -1,0 +1,19 @@
+# FalkorDB for LineageGate. Server on 6379, FalkorDB Browser on http://localhost:3000
+# Usage: docker compose up -d   (then: lineagegate seed)
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    ports:
+      - "6379:6379"
+      - "3000:3000"
+    volumes:
+      - falkordb-data:/var/lib/falkordb/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6379", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  falkordb-data:

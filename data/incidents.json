@@ -1,0 +1,68 @@
+[
+  {
+    "key": "INC-0802",
+    "title": "Revenue dashboard showed 100x values after Shopify cents/dollars change",
+    "opened_at": "2026-08-02T14:10:00Z",
+    "resolved_at": "2026-08-02T19:40:00Z",
+    "severity": "SEV2",
+    "status": "resolved",
+    "root_cause": "Upstream Shopify export switched total_price to cents; stg_orders.amount was not divided by 100.",
+    "resolution": "Added accepted_range test on stg_orders.amount; contract orders_amount bumped to v2.",
+    "triggered_by": "ingest_shopify",
+    "violated": [
+      "orders_amount"
+    ],
+    "owner": "priya.raman",
+    "related": []
+  },
+  {
+    "key": "INC-0916",
+    "title": "Duplicate customer_id rows after CRM backfill",
+    "opened_at": "2026-09-16T09:05:00Z",
+    "resolved_at": "2026-09-16T16:30:00Z",
+    "severity": "SEV3",
+    "status": "resolved",
+    "root_cause": "CRM backfill re-inserted merged contacts, producing duplicate customer_id values in raw.crm_customers.",
+    "resolution": "Dedup step added to stg_customers; CRM team notified.",
+    "triggered_by": "ingest_crm",
+    "violated": [
+      "customers_identity"
+    ],
+    "owner": "sam.rivera",
+    "related": []
+  },
+  {
+    "key": "INC-0917",
+    "title": "dbt_mart_customers_daily failed on unique test (customer grain)",
+    "opened_at": "2026-09-17T11:20:00Z",
+    "resolved_at": "2026-09-17T15:00:00Z",
+    "severity": "SEV2",
+    "status": "resolved",
+    "root_cause": "Duplicates from INC-0916 propagated through dim_customer into mart_customers.",
+    "resolution": "Re-ran ingest_crm after dedup fix, then dbt_mart_customers_daily.",
+    "triggered_by": "dbt_mart_customers_daily",
+    "violated": [
+      "dim_customer_grain"
+    ],
+    "owner": "jules.chen",
+    "related": [
+      "INC-0916"
+    ]
+  },
+  {
+    "key": "INC-0930",
+    "title": "Daily Revenue dashboard stale for 30 hours",
+    "opened_at": "2026-09-30T12:00:00Z",
+    "resolved_at": "2026-09-30T14:45:00Z",
+    "severity": "SEV3",
+    "status": "resolved",
+    "root_cause": "dbt_finance_daily was paused during a warehouse maintenance window and not resumed.",
+    "resolution": "Resumed schedule; added freshness alert.",
+    "triggered_by": "dbt_finance_daily",
+    "violated": [
+      "finance_revenue_freshness"
+    ],
+    "owner": "marcus.lee",
+    "related": []
+  }
+]
