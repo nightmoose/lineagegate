@@ -8,7 +8,7 @@
 |---|---|
 | **Tracks** | **Track 01: Connected Data for AI Agents** (primary). **Track 02** (agent memory): incidents are written back into the graph and recalled in later sessions. |
 | **Stack** | FalkorDB · Python · FastAPI · xAI Grok (OpenAI-compatible tool calling) · vis-network UI · Fly.io |
-| **Data** | Fully synthetic "Acme Analytics" warehouse: 111 nodes, 248 edges, 11 labels, 13 relationship types |
+| **Data** | Fully synthetic "Acme Analytics" warehouse: 111 nodes, 248 edges, 11 labels, 12 relationship types |
 
 ### 30-second pitch
 
@@ -43,6 +43,51 @@ flowchart LR
 ```
 
 On Fly.io, FalkorDB and the app share one machine. The graph is seeded on boot if it's empty.
+
+### Graph data model
+
+Node labels and relationship types; arrows point upstream ("depends on"). The live version is in the UI's
+**Data model** tab (`GET /schema`). Details are in [`docs/data-model.md`](docs/data-model.md).
+
+```mermaid
+flowchart RL
+  Source([Source])
+  Table[Table]
+  Column[Column]
+  Model[Model]
+  Dashboard[[Dashboard]]
+  Contract{{Contract}}
+  Test[/Test/]
+  Job>Job]
+  Incident((Incident))
+  Team[Team]
+  Person[Person]
+
+  Job -->|READS_FROM| Source
+  Job -->|WRITES_TO| Table
+  Job -->|REFRESHES| Model
+  Job -->|REFRESHES| Dashboard
+  Table -->|HAS_COLUMN| Column
+  Model -->|HAS_COLUMN| Column
+  Model -->|READS_FROM| Table
+  Model -->|DEPENDS_ON| Model
+  Column -->|DEPENDS_ON| Column
+  Dashboard -->|DISPLAYS| Model
+  Column -->|GOVERNED_BY| Contract
+  Model -->|GOVERNED_BY| Contract
+  Test -->|GOVERNED_BY| Contract
+  Test -->|READS_FROM| Column
+  Test -->|READS_FROM| Model
+  Incident -->|TRIGGERED_BY| Job
+  Incident -->|VIOLATED| Contract
+  Incident -->|RELATED_TO| Incident
+  Incident -->|OWNED_BY| Person
+  Model -->|OWNED_BY| Team
+  Dashboard -->|OWNED_BY| Team
+  Person -->|MEMBER_OF| Team
+```
+
+![Data model tab](docs/ui-schema.png)
 
 ### Quickstart (local, ~1 minute)
 
@@ -131,7 +176,7 @@ curl 'localhost:8000/impact?column=stg_orders.amount'
 curl -XPOST localhost:8000/chat -H 'content-type: application/json' -d '{"question":"Why did dbt_mart_customers_daily fail?"}'
 ```
 
-Also `/triage?job=`, `/incidents?node=&text=`, `/critical?algorithm=pagerank|betweenness`.
+Also `/schema` (live label/relationship counts), `/triage?job=`, `/incidents?node=&text=`, `/critical?algorithm=pagerank|betweenness`.
 
 ## Deploy (Fly.io)
 

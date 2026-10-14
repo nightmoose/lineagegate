@@ -31,6 +31,7 @@ form button{background:var(--acc);border:0;color:#fff;border-radius:8px;padding:
 .path:hover,.path.on{background:#1f2a40}
 .n{background:#25324b;border-radius:4px;padding:1px 6px}.e{color:var(--hl)}
 .muted{color:var(--mut)}.spin{color:var(--mut);font-style:italic}
+.tabs{display:flex;gap:18px}.tab{cursor:pointer}.tab.on{color:var(--text);border-bottom:2px solid var(--acc);padding-bottom:2px}
 footer{text-align:center;padding:8px;color:var(--mut);font-size:12px;border-top:1px solid var(--line)}
 footer a{color:var(--acc);text-decoration:none}
 </style>
@@ -50,9 +51,10 @@ footer a{color:var(--acc);text-decoration:none}
   <form id="f"><input id="q" placeholder="Ask LineageGate…" autocomplete="off"><button>Ask</button></form>
 </section>
 <section>
-  <h2>Evidence</h2>
+  <h2 class="tabs"><span class="tab on" data-t="ev">Evidence</span><span class="tab" data-t="schema">Data model</span></h2>
   <div id="graph"></div>
   <div id="ev" class="muted">Tool calls and graph paths appear here.</div>
+  <div id="schemaInfo" style="display:none;flex:1;overflow:auto;padding:12px 16px" class="muted"></div>
 </section>
 </main>
 <footer>Powered by <a href="https://www.falkordb.com/" target="_blank" rel="noopener">FalkorDB</a></footer>
@@ -69,14 +71,14 @@ function findPaths(o,out=[]){if(typeof o==='string'){if(/^\(\w+ [^)]+\) (<-|-)\[
   else if(Array.isArray(o))o.forEach(x=>findPaths(x,out));else if(o&&typeof o==='object')Object.values(o).forEach(x=>findPaths(x,out));return [...new Set(out)]}
 function pathHtml(t){return esc(t).replace(/\((\w+) ([^)]+)\)/g,'<span class="n">$1 <b>$2</b></span>').replace(/(&lt;-\[:\w+\]-|-\[:\w+\]-&gt;)/g,'<span class="e">$1</span>')}
 let net=null;
-function draw(paths,hi){const N=new Map(),E=new Map(),hiP=hi!=null?parsePath(paths[hi]):null,hiN=new Set(hiP?hiP.nodes.map(n=>n.id):[]),hiE=new Set(hiP?hiP.edges.map(e=>e.from+e.type+e.to):[]);
+var draw=function(paths,hi){const N=new Map(),E=new Map(),hiP=hi!=null?parsePath(paths[hi]):null,hiN=new Set(hiP?hiP.nodes.map(n=>n.id):[]),hiE=new Set(hiP?hiP.edges.map(e=>e.from+e.type+e.to):[]);
   paths.forEach(p=>{const g=parsePath(p);g.nodes.forEach(n=>N.set(n.id,n));g.edges.forEach(e=>E.set(e.from+e.type+e.to,e))});
   const on=id=>hi==null||hiN.has(id);
   const nodes=[...N.values()].map(n=>({id:n.id,label:n.name+'\n'+n.label,shape:'box',color:{background:on(n.id)?COLORS[n.label]||'#888':'#2a3346',border:on(n.id)&&hi!=null?'#fff':'#0000'},font:{color:on(n.id)?'#fff':'#6b778d',size:12,multi:false},borderWidth:hi!=null&&on(n.id)?2:0,margin:8}));
   const edges=[...E.entries()].map(([k,e])=>({from:e.from,to:e.to,label:e.type,arrows:'to',font:{color:'#8b97ad',size:10,strokeWidth:0},color:{color:hi==null||hiE.has(k)?'#ffb547':'#33405a'},width:hi==null||hiE.has(k)?2:1}));
   const data={nodes:new vis.DataSet(nodes),edges:new vis.DataSet(edges)};
   const opts={layout:{hierarchical:{direction:'LR',sortMethod:'directed',levelSeparation:170,nodeSpacing:70}},physics:false,interaction:{hover:true}};
-  if(net)net.destroy();net=new vis.Network($('#graph'),data,opts)}
+  if(net)net.destroy();net=new vis.Network($('#graph'),data,opts)};
 function renderEvidence(calls){const ev=$('#ev');ev.classList.remove('muted');let all=[];
   if(!calls.length){ev.innerHTML='<span class="muted">No tool calls.</span>';if(net)net.destroy();return}
   ev.innerHTML=calls.map(c=>{const ps=findPaths(c.result).slice(0,8);const start=all.length;all.push(...ps);
@@ -88,9 +90,20 @@ function md(s){return esc(s).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`([^
 function add(cls,html){const d=document.createElement('div');d.className='m '+cls;d.innerHTML=html;$('#msgs').append(d);$('#msgs').scrollTop=1e9;return d}
 async function ask(q){if(!q.trim())return;add('u',esc(q));const w=add('a spin','Querying the graph…');
   try{const r=await fetch('chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:q})});
-    const j=await r.json();w.classList.remove('spin');w.innerHTML=md(j.answer||JSON.stringify(j));$('#mode').textContent='mode: '+j.mode;renderEvidence(j.tool_calls||[])}
+    const j=await r.json();w.classList.remove('spin');w.innerHTML=md(j.answer||JSON.stringify(j));$('#mode').textContent='mode: '+j.mode;if(tab!=='ev')document.querySelector('.tab[data-t=ev]').click();renderEvidence(j.tool_calls||[])}
   catch(e){w.textContent='Error: '+e}}
 $('#f').onsubmit=e=>{e.preventDefault();ask($('#q').value);$('#q').value=''};
+let lastDraw=null,tab='ev';
+const _draw=draw;draw=(p,h)=>{lastDraw=[p,h];if(tab==='ev')_draw(p,h)};
+async function showSchema(){const j=await (await fetch('schema')).json();
+  const nodes=j.labels.map(l=>({id:l.label,label:`${l.label}\n(${l.count})`,shape:'box',color:{background:COLORS[l.label]||'#888'},font:{color:'#fff',size:13},margin:10}));
+  const edges=j.pairs.map(p=>({from:p.from,to:p.to,label:`${p.type} (${p.count})`,arrows:'to',font:{color:'#8b97ad',size:10,strokeWidth:0},color:{color:'#ffb547'},smooth:{type:'curvedCW',roundness:0.15}}));
+  if(net)net.destroy();net=new vis.Network($('#graph'),{nodes:new vis.DataSet(nodes),edges:new vis.DataSet(edges)},{physics:{solver:'forceAtlas2Based',stabilization:{iterations:300}},interaction:{hover:true}});
+  $('#schemaInfo').innerHTML=`Live schema from FalkorDB: <b>${j.labels.length}</b> labels, <b>${j.relationship_types.length}</b> relationship types, ${j.pairs.reduce((a,p)=>a+p.count,0)} edges.<br><br>`+
+    j.pairs.map(p=>`<div class="path"><span class="n">${esc(p.from)}</span> <span class="e">-[:${esc(p.type)}]-&gt;</span> <span class="n">${esc(p.to)}</span> <span class="muted">× ${p.count}</span></div>`).join('')}
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{tab=t.dataset.t;document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));
+  $('#ev').style.display=tab==='ev'?'':'none';$('#schemaInfo').style.display=tab==='schema'?'':'none';
+  if(tab==='schema')showSchema();else{if(net)net.destroy();net=null;if(lastDraw)_draw(...lastDraw)}});
 document.querySelectorAll('.samples button').forEach(b=>b.onclick=()=>ask(b.textContent));
 </script>
 </body></html>

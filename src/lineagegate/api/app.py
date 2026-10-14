@@ -72,3 +72,17 @@ STATIC = Path(__file__).parent / "static"
 @app.get("/", include_in_schema=False)
 def ui() -> FileResponse:
     return FileResponse(STATIC / "index.html")
+
+
+@app.get("/schema")
+def schema() -> dict:
+    """Live schema from FalkorDB: labels, relationship types, and label-[type]->label pairs with counts."""
+    from lineagegate.graph.client import ro
+    labels = {r[0]: 0 for r in ro("CALL db.labels() YIELD label RETURN label")}
+    for lbl, n in ro("MATCH (n) RETURN labels(n)[0], count(n)"):
+        labels[lbl] = n
+    rel_types = [r[0] for r in ro("CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType")]
+    pairs = [{"from": a, "type": t, "to": b, "count": c} for a, t, b, c in ro(
+        "MATCH (a)-[r]->(b) RETURN labels(a)[0], type(r), labels(b)[0], count(r) ORDER BY type(r), labels(a)[0]")]
+    return {"labels": [{"label": k, "count": v} for k, v in sorted(labels.items())],
+            "relationship_types": sorted(rel_types), "pairs": pairs}

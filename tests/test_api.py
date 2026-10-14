@@ -22,3 +22,11 @@ def test_chat_offline():
     assert r["mode"] == "offline-router"
     assert r["tool_calls"][0]["tool"] == "impact_from_column"
     assert "finance.revenue_daily" in r["answer"]
+
+
+def test_schema_endpoint():
+    j = client.get("/schema").json()
+    assert {l["label"] for l in j["labels"]} >= {"Column", "Model", "Dashboard", "Incident"}
+    assert "DEPENDS_ON" in j["relationship_types"]
+    assert {"from": "Dashboard", "type": "DISPLAYS", "to": "Model", "count": 8} in j["pairs"]
+    assert sum(p["count"] for p in j["pairs"]) == 248
