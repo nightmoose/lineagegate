@@ -10,7 +10,7 @@
 header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:14px}
 header h1{margin:0;font-size:20px;letter-spacing:.3px}header h1 span{color:var(--acc)}header p{margin:0;color:var(--mut)}
 #mode{margin-left:auto;font-size:12px;color:var(--mut)}
-main{flex:1;display:grid;grid-template-columns:minmax(360px,1fr) minmax(420px,1.2fr);gap:14px;padding:14px;min-height:0}
+main{flex:1;display:grid;grid-template-columns:minmax(340px,1fr) minmax(460px,1.45fr);gap:14px;padding:14px;min-height:0}
 section{background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;min-height:0}
 h2{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--mut);margin:0;padding:12px 16px;border-bottom:1px solid var(--line)}
 #msgs{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
@@ -23,7 +23,11 @@ h2{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--mut);m
 form{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
 input{flex:1;background:#0c1220;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 12px;font-size:14px}
 form button{background:var(--acc);border:0;color:#fff;border-radius:8px;padding:0 18px;font-weight:600;cursor:pointer}
-#graph{height:46%;min-height:240px;border-bottom:1px solid var(--line);background:#0c1220}
+#gwrap{position:relative;height:52%;min-height:300px;border-bottom:1px solid var(--line);background:#0c1220}#graph{position:absolute;inset:0}
+.gbtns{position:absolute;top:8px;right:8px;display:flex;gap:6px}.gbtns button{background:#1d2638e6;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer}.gbtns button:hover{border-color:var(--acc)}
+body.schema #gwrap{height:64%}
+#gwrap.full{position:fixed;inset:0;z-index:50;height:auto}
+div.vis-tooltip{background:#1d2638;color:#e6ebf5;border:1px solid #33405a;font:12px ui-monospace,monospace;padding:4px 8px;border-radius:4px}
 #ev{flex:1;overflow:auto;padding:12px 16px}
 .tool{border:1px solid var(--line);border-radius:8px;margin-bottom:10px;overflow:hidden}
 .tool .h{padding:8px 12px;background:#1d2638;font-family:ui-monospace,monospace;font-size:12.5px}
@@ -52,7 +56,7 @@ footer a{color:var(--acc);text-decoration:none}
 </section>
 <section>
   <h2 class="tabs"><span class="tab on" data-t="ev">Evidence</span><span class="tab" data-t="schema">Data model</span></h2>
-  <div id="graph"></div>
+  <div id="gwrap"><div id="graph"></div><div class="gbtns"><button id="fitBtn" title="Fit graph">⤢ Fit</button><button id="expBtn" title="Expand graph">⛶ Expand</button></div></div>
   <div id="ev" class="muted">Tool calls and graph paths appear here.</div>
   <div id="schemaInfo" style="display:none;flex:1;overflow:auto;padding:12px 16px" class="muted"></div>
 </section>
@@ -71,14 +75,22 @@ function findPaths(o,out=[]){if(typeof o==='string'){if(/^\(\w+ [^)]+\) (<-|-)\[
   else if(Array.isArray(o))o.forEach(x=>findPaths(x,out));else if(o&&typeof o==='object')Object.values(o).forEach(x=>findPaths(x,out));return [...new Set(out)]}
 function pathHtml(t){return esc(t).replace(/\((\w+) ([^)]+)\)/g,'<span class="n">$1 <b>$2</b></span>').replace(/(&lt;-\[:\w+\]-|-\[:\w+\]-&gt;)/g,'<span class="e">$1</span>')}
 let net=null;
-var draw=function(paths,hi){const N=new Map(),E=new Map(),hiP=hi!=null?parsePath(paths[hi]):null,hiN=new Set(hiP?hiP.nodes.map(n=>n.id):[]),hiE=new Set(hiP?hiP.edges.map(e=>e.from+e.type+e.to):[]);
-  paths.forEach(p=>{const g=parsePath(p);g.nodes.forEach(n=>N.set(n.id,n));g.edges.forEach(e=>E.set(e.from+e.type+e.to,e))});
-  const on=id=>hi==null||hiN.has(id);
-  const nodes=[...N.values()].map(n=>({id:n.id,label:n.name+'\n'+n.label,shape:'box',color:{background:on(n.id)?COLORS[n.label]||'#888':'#2a3346',border:on(n.id)&&hi!=null?'#fff':'#0000'},font:{color:on(n.id)?'#fff':'#6b778d',size:12,multi:false},borderWidth:hi!=null&&on(n.id)?2:0,margin:8}));
-  const edges=[...E.entries()].map(([k,e])=>({from:e.from,to:e.to,label:e.type,arrows:'to',font:{color:'#8b97ad',size:10,strokeWidth:0},color:{color:hi==null||hiE.has(k)?'#ffb547':'#33405a'},width:hi==null||hiE.has(k)?2:1}));
-  const data={nodes:new vis.DataSet(nodes),edges:new vis.DataSet(edges)};
-  const opts={layout:{hierarchical:{direction:'LR',sortMethod:'directed',levelSeparation:170,nodeSpacing:70}},physics:false,interaction:{hover:true}};
-  if(net)net.destroy();net=new vis.Network($('#graph'),data,opts)};
+var draw=function(paths,hi){
+  const N=new Map(),E=new Map(),lvl=new Map();
+  const hiP=hi!=null?parsePath(paths[hi]):null,hiN=new Set(hiP?hiP.nodes.map(n=>n.id):[]),hiE=new Set(hiP?hiP.edges.map(e=>e.from+e.type+e.to):[]);
+  paths.forEach(p=>{const g=parsePath(p);g.nodes.forEach((n,i)=>{N.set(n.id,n);lvl.set(n.id,Math.min(lvl.has(n.id)?lvl.get(n.id):99,i))});g.edges.forEach(e=>E.set(e.from+e.type+e.to,e))});
+  const on=id=>hi==null||hiN.has(id), crowded=E.size>12;
+  const nodes=[...N.values()].map(n=>{const o=on(n.id),c=COLORS[n.label]||'#888';return {id:n.id,level:lvl.get(n.id),label:`<b>${esc(n.name)}</b>\n${n.label}`,shape:'box',
+    color:{background:o?c:'#1e2738',border:o?'#ffffff':c+'88',highlight:{background:c,border:'#fff'},hover:{background:o?c:'#2a3550',border:'#fff'}},
+    font:{color:o?'#ffffff':'#d5dcea',size:14,face:'Inter,system-ui,sans-serif',multi:'html',bold:{color:o?'#fff':'#e6ebf5',size:14}},borderWidth:o&&hi!=null?2:1,margin:{top:8,bottom:8,left:10,right:10}}});
+  const edges=[...E.entries()].map(([k,e])=>{const h=hi==null||hiE.has(k);return {from:e.from,to:e.to,label:(!crowded||h)?e.type:undefined,title:e.type,arrows:{to:{scaleFactor:.6}},
+    font:{color:h?'#ffd28a':'#aab4c8',size:11,align:'horizontal',strokeWidth:0,background:'#0c1220ee'},
+    color:{color:h?'#ffb547':'#4a5875',hover:'#ffd28a',highlight:'#ffb547'},width:h?2.5:1.2,smooth:false}});
+  const opts={layout:{hierarchical:{direction:'LR',sortMethod:'directed',levelSeparation:200,nodeSpacing:70,treeSpacing:90,blockShifting:true,edgeMinimization:true,parentCentralization:true}},
+    physics:false,interaction:{hover:true,tooltipDelay:120,navigationButtons:false,keyboard:false}};
+  if(net)net.destroy();net=new vis.Network($('#graph'),{nodes:new vis.DataSet(nodes),edges:new vis.DataSet(edges)},opts);
+  net.once('afterDrawing',()=>{net.fit({nodes:hiN.size?[...hiN]:undefined,animation:false});
+    if(net.getScale()<0.75)net.moveTo({scale:0.75,position:hiN.size?net.getViewPosition():undefined})})};
 function renderEvidence(calls){const ev=$('#ev');ev.classList.remove('muted');let all=[];
   if(!calls.length){ev.innerHTML='<span class="muted">No tool calls.</span>';if(net)net.destroy();return}
   ev.innerHTML=calls.map(c=>{const ps=findPaths(c.result).slice(0,8);const start=all.length;all.push(...ps);
@@ -95,15 +107,27 @@ async function ask(q){if(!q.trim())return;add('u',esc(q));const w=add('a spin','
 $('#f').onsubmit=e=>{e.preventDefault();ask($('#q').value);$('#q').value=''};
 let lastDraw=null,tab='ev';
 const _draw=draw;draw=(p,h)=>{lastDraw=[p,h];if(tab==='ev')_draw(p,h)};
+const SCHEMA_POS={Source:[-620,-40],Job:[-380,-260],Table:[-380,120],Column:[-80,300],Model:[-80,-60],Dashboard:[220,-300],
+  Test:[-380,420],Contract:[260,300],Incident:[560,240],Team:[420,-60],Person:[700,-200]};
 async function showSchema(){const j=await (await fetch('schema')).json();
-  const nodes=j.labels.map(l=>({id:l.label,label:`${l.label}\n(${l.count})`,shape:'box',color:{background:COLORS[l.label]||'#888'},font:{color:'#fff',size:13},margin:10}));
-  const edges=j.pairs.map(p=>({from:p.from,to:p.to,label:`${p.type} (${p.count})`,arrows:'to',font:{color:'#8b97ad',size:10,strokeWidth:0},color:{color:'#ffb547'},smooth:{type:'curvedCW',roundness:0.15}}));
-  if(net)net.destroy();net=new vis.Network($('#graph'),{nodes:new vis.DataSet(nodes),edges:new vis.DataSet(edges)},{physics:{solver:'forceAtlas2Based',stabilization:{iterations:300}},interaction:{hover:true}});
-  $('#schemaInfo').innerHTML=`Live schema from FalkorDB: <b>${j.labels.length}</b> labels, <b>${j.relationship_types.length}</b> relationship types, ${j.pairs.reduce((a,p)=>a+p.count,0)} edges.<br><br>`+
+  const nodes=j.labels.map((l,i)=>{const p=SCHEMA_POS[l.label]||[900,-300+i*80];return {id:l.label,x:p[0]*0.6,y:p[1]*0.62,label:`<b>${esc(l.label)}</b>\n${l.count} nodes`+j.pairs.filter(x=>x.from===l.label&&x.to===l.label).map(x=>`\n↻ ${x.type} ·${x.count}`).join(''),shape:'box',
+    color:{background:COLORS[l.label]||'#888',border:'#ffffff55',highlight:{background:COLORS[l.label]||'#888',border:'#fff'}},font:{color:'#fff',size:14,multi:'html',bold:{size:15}},margin:9,borderWidth:1}});
+  const seen={};
+  const edges=j.pairs.map(p=>{const self=p.from===p.to,key=[p.from,p.to].sort().join('|');const n=seen[key]=(seen[key]||0)+1;
+        return {from:p.from,to:p.to,label:(self||p.type==='OWNED_BY'||p.type==='MEMBER_OF')?undefined:`${p.type} ·${p.count}`,title:`${p.from} -[:${p.type}]-> ${p.to} (${p.count})`,arrows:{to:{scaleFactor:.6}},
+      font:{color:'#e9edf5',size:11,align:'middle',strokeWidth:0,background:'#0c1220e6'},color:{color:p.type==='OWNED_BY'||p.type==='MEMBER_OF'?'#6c7a96':'#ffb547',highlight:'#fff',hover:'#fff'},
+      width:1.4,selfReference:{size:40,renderBehindTheNode:false,angle:({Model:Math.PI,Column:Math.PI*0.6})[p.from]??Math.PI/4},smooth:self?undefined:{type:n%2?'curvedCW':'curvedCCW',roundness:0.12+0.12*Math.floor((n-1)/2)}}});
+  if(net)net.destroy();net=new vis.Network($('#graph'),{nodes:new vis.DataSet(nodes),edges:new vis.DataSet(edges)},{physics:false,interaction:{hover:true,tooltipDelay:120,dragNodes:true}});
+  net.once('afterDrawing',()=>net.fit({animation:false}));
+  $('#schemaInfo').innerHTML=`Live schema from FalkorDB (hover an edge for details; ownership edges are grey): <b>${j.labels.length}</b> labels, <b>${j.relationship_types.length}</b> relationship types, ${j.pairs.reduce((a,p)=>a+p.count,0)} edges.<br><br>`+
     j.pairs.map(p=>`<div class="path"><span class="n">${esc(p.from)}</span> <span class="e">-[:${esc(p.type)}]-&gt;</span> <span class="n">${esc(p.to)}</span> <span class="muted">× ${p.count}</span></div>`).join('')}
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{tab=t.dataset.t;document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));
-  $('#ev').style.display=tab==='ev'?'':'none';$('#schemaInfo').style.display=tab==='schema'?'':'none';
+  document.body.classList.toggle('schema',tab==='schema');$('#ev').style.display=tab==='ev'?'':'none';$('#schemaInfo').style.display=tab==='schema'?'':'none';
   if(tab==='schema')showSchema();else{if(net)net.destroy();net=null;if(lastDraw)_draw(...lastDraw)}});
+$('#fitBtn').onclick=()=>net&&net.fit({animation:true});
+$('#expBtn').onclick=()=>{const w=$('#gwrap');w.classList.toggle('full');$('#expBtn').textContent=w.classList.contains('full')?'✕ Close':'⛶ Expand';setTimeout(()=>net&&(net.redraw(),net.fit()),50)};
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#gwrap').classList.contains('full'))$('#expBtn').click()});
+window.addEventListener('resize',()=>net&&net.fit());
 document.querySelectorAll('.samples button').forEach(b=>b.onclick=()=>ask(b.textContent));
 </script>
 </body></html>
