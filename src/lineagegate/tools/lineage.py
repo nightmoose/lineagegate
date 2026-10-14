@@ -6,7 +6,9 @@ agent can cite evidence instead of guessing.
 """
 from __future__ import annotations
 
-from lineagegate.graph.client import PATH_NODES, PATH_RELS, make_path, resolve_node, ro
+import difflib
+
+from lineagegate.graph.client import PATH_NODES, PATH_RELS, make_path, requires_graph, resolve_node, ro, suggest
 
 MAX_HOPS = 8
 
@@ -84,6 +86,7 @@ def _shortest_per_target(rows) -> dict[str, dict]:
     return out
 
 
+@requires_graph
 def impact_from_column(table: str, column: str | None = None) -> dict:
     """Downstream blast radius of changing ``table.column``.
 
@@ -98,9 +101,14 @@ def impact_from_column(table: str, column: str | None = None) -> dict:
         candidates = [{"id": r[0]} for r in ro(
             "MATCH (c:Column) WHERE c.table = $t OR c.name = $n RETURN c.id ORDER BY c.id LIMIT 10",
             {"t": table_part, "n": fqn.rsplit(".", 1)[-1]})]
-        return {"found": False, "column": fqn,
-                "error": f"No Column with fqn '{fqn}' in the graph.",
-                "did_you_mean": [c["id"].removeprefix("column:") for c in candidates]}
+        did = [c["id"].removeprefix("column:") for c in candidates]
+        did = list(dict.fromkeys(did + suggest(fqn, "Column")))
+        did.sort(key=lambda x: -difflib.SequenceMatcher(None, fqn.lower(), x.lower()).ratio())
+        table_known = bool(ro("MATCH (n) WHERE (n:Model OR n:Table) AND n.name = $t RETURN n.id LIMIT 1",
+                              {"t": table_part}))
+        err = (f"Table/model '{table_part}' exists but has no column '{fqn.rsplit('.', 1)[-1]}'."
+               if table_known else f"No Column with fqn '{fqn}' in the graph.")
+        return {"found": False, "column": fqn, "error": err, "did_you_mean": did[:8]}
 
     p = {"fqn": fqn}
     models = _shortest_per_target(ro(IMPACT_MODELS, p))
@@ -162,12 +170,14 @@ MATCH (p:Person {id: $id})-[:MEMBER_OF]->(t:Team) RETURN t.id, t.name
 """
 
 
+@requires_graph
 def owners_for_node(node: str) -> dict:
     """Who owns a node: Team/Person via OWNED_BY (inherited through
     HAS_COLUMN for columns), plus team members (MEMBER_OF) and on-call."""
     matches = resolve_node(node)
     if not matches:
-        return {"found": False, "node": node, "error": f"No node matches '{node}'."}
+        return {"found": False, "node": node, "error": f"No node matches '{node}'.",
+                "candidates": suggest(node)}
     if len(matches) > 1 and matches[0]["id"] != node:
         return {"found": False, "node": node, "error": "Ambiguous reference; pick one id.",
                 "candidates": [m["id"] for m in matches]}
@@ -222,6 +232,7 @@ RETURN length(p) AS hops, {PATH_NODES} AS pnodes, {PATH_RELS} AS prels
 """
 
 
+@requires_graph
 def paths_explain(source: str, target: str, k: int = 3, include_ownership: bool = False,
                   max_hops: int = MAX_HOPS) -> dict:
     """Explain how two nodes are connected: up to ``k`` shortest paths
@@ -230,7 +241,7 @@ def paths_explain(source: str, target: str, k: int = 3, include_ownership: bool 
     for ref in (source, target):
         m = resolve_node(ref)
         if not m:
-            return {"found": False, "error": f"No node matches '{ref}'."}
+            return {"found": False, "error": f"No node matches '{ref}'.", "candidates": suggest(ref)}
         if len(m) > 1 and m[0]["id"] != ref:
             return {"found": False, "error": f"'{ref}' is ambiguous.", "candidates": [x["id"] for x in m]}
         ends.append(m[0])

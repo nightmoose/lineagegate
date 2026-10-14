@@ -28,7 +28,10 @@ Rules:
 - Only call record_incident when the user explicitly asks to record or log an incident.
 - Cite at least one graph path verbatim (the `text` / `path` fields) as evidence.
 - Name impacted dashboards, contracts at risk, failing tests, and the owner team / on-call person.
-- If a tool returns found=false or no path, say so plainly; do not guess.
+- If a tool returns found=false, an empty result, or no path, say plainly that the graph has no
+  evidence for it, offer any did_you_mean / candidates, and STOP. Never invent tables, columns,
+  dashboards, owners, or paths that no tool returned.
+- If a name is ambiguous, list the candidates and ask which one; do not pick silently.
 Keep answers short: a 1-2 sentence verdict, then bullets."""
 
 
@@ -136,8 +139,10 @@ def route(question: str) -> tuple[str, dict] | None:
 
 def render_impact(r: dict) -> str:
     if not r.get("found"):
+        if r.get("empty_graph"):
+            return r["error"]
         hint = f" Did you mean: {', '.join(r['did_you_mean'])}?" if r.get("did_you_mean") else ""
-        return f"I could not find column `{r['column']}` in the lineage graph.{hint}"
+        return f"I could not find column `{r['column']}` in the lineage graph. {r.get('error', '')}{hint}"
     imp = r["impacted"]
     dashes = imp["dashboards"]
     lines = [
@@ -190,7 +195,8 @@ def render_paths(r: dict) -> str:
 
 def render_triage(r: dict) -> str:
     if not r.get("found"):
-        return r.get("error", "not found") + (f" Failed jobs: {', '.join(r['failed_jobs'])}" if r.get("failed_jobs") else "")
+        dym = f" Did you mean: {', '.join(r['did_you_mean'])}?" if r.get("did_you_mean") else ""
+        return r.get("error", "not found") + dym + (f" Failed jobs: {', '.join(r['failed_jobs'])}" if r.get("failed_jobs") else "")
     j = r["job"]
     lines = [f"{j['id']} is {j['status']} (last run {j['last_run_at']}): {j.get('last_error') or 'no error text'}"]
     if r["failing_tests"]:
@@ -214,7 +220,7 @@ def render_triage(r: dict) -> str:
 
 def render_incidents(r: dict) -> str:
     if not r.get("found"):
-        return "No similar incidents in graph memory."
+        return r.get("error") or "No similar incidents in graph memory."
     lines = ["Similar incidents:"]
     for i in r["incidents"]:
         lines.append(f"  {i['id']} [{i['severity']}] score {i['score']}: {i['title']}")
@@ -225,9 +231,14 @@ def render_incidents(r: dict) -> str:
 
 
 def render_critical(r: dict) -> str:
+    if not r.get("found"):
+        return r.get("error", "no assets")
     lines = [f"Most critical models by {r['algorithm']} over DEPENDS_ON:"]
     lines += [f"  {i+1}. {a['id']} score {a['score']} - {a['downstream_models']} downstream models, "
               f"{a['dashboards']} dashboards, owner {a['owner_team']}" for i, a in enumerate(r["assets"])]
+    if r.get("top_asset_paths"):
+        lines += ["", f"Why {r['assets'][0]['id']} matters (dashboards that depend on it):"]
+        lines += [f"  [{p['hops']} hops] {p['text']}" for p in r["top_asset_paths"]]
     return "\n".join(lines)
 
 

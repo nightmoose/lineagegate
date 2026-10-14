@@ -9,7 +9,8 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from lineagegate.graph.client import PATH_NODES, PATH_RELS, graph, make_path, resolve_node, ro
+from lineagegate.graph.client import (PATH_NODES, PATH_RELS, graph, make_path, requires_graph, resolve_node,
+                                      ro, suggest)
 
 _WORD = re.compile(r"[a-z0-9_]{3,}")
 _STOP = {"the", "and", "for", "with", "after", "was", "not", "from", "into", "this", "that", "failed", "values"}
@@ -30,6 +31,7 @@ def _resolve(ref: str, label: str) -> dict | None:
 # --------------------------------------------------------------------------
 # triage_failed_job
 # --------------------------------------------------------------------------
+@requires_graph
 def triage_failed_job(job: str | None = None) -> dict:
     """Explain a failed job: failing tests, upstream suspects, violated contracts,
     downstream dashboards, owners and matching past incidents."""
@@ -40,7 +42,7 @@ def triage_failed_job(job: str | None = None) -> dict:
         job = rows[0][0]
     j = _resolve(job, "Job")
     if j is None:
-        return {"found": False, "error": f"job {job!r} not found",
+        return {"found": False, "error": f"job {job!r} not found", "did_you_mean": suggest(job, "Job"),
                 "failed_jobs": [r[0] for r in ro("MATCH (j:Job {status:'failed'}) RETURN j.id ORDER BY j.id")]}
     jid = j["id"]
     info = ro("MATCH (j:Job {id:$id}) RETURN j.status, j.last_error, j.last_run_at, j.kind", {"id": jid})[0]
@@ -105,6 +107,7 @@ _LINEAGE_RELS = ("DEPENDS_ON|READS_FROM|WRITES_TO|REFRESHES|HAS_COLUMN|GOVERNED_
                  "TRIGGERED_BY|VIOLATED|RELATED_TO|DISPLAYS")
 
 
+@requires_graph
 def similar_incidents(node: str | None = None, text: str | None = None, k: int = 5) -> dict:
     """Rank stored incidents by graph proximity to ``node`` (shared job,
     contract, or lineage neighbourhood) plus keyword overlap with ``text``."""
@@ -174,6 +177,7 @@ def record_incident(title: str, root_cause: str = "", severity: str = "SEV3",
 # --------------------------------------------------------------------------
 # critical_assets
 # --------------------------------------------------------------------------
+@requires_graph
 def critical_assets(algorithm: str = "pagerank", k: int = 5) -> dict:
     """Rank models by structural importance in the DEPENDS_ON lineage using
     FalkorDB's built-in algorithms (algo.pageRank or algo.betweenness), and
@@ -194,7 +198,18 @@ def critical_assets(algorithm: str = "pagerank", k: int = 5) -> dict:
         OPTIONAL MATCH (node)-[:OWNED_BY]->(t:Team)
         RETURN node.id, score, downstream, dashboards, t.name
         ORDER BY score DESC, node.id""", {"k": int(k)})
-    return {"found": bool(rows), "algorithm": algorithm,
+    paths = []
+    if rows:
+        # Evidence: why the top asset matters = shortest path from each dashboard down to it.
+        best: dict[str, dict] = {}
+        for did, pn, pr in ro(
+                f"""MATCH p = (d:Dashboard)-[:DISPLAYS]->(:Model)-[:DEPENDS_ON*0..8]->(m:Model {{id:$id}})
+                    RETURN d.id, {PATH_NODES}, {PATH_RELS}""", {"id": rows[0][0]}):
+            path = make_path(pn, pr)
+            if did not in best or path["hops"] < best[did]["hops"]:
+                best[did] = {"target": did, "hops": path["hops"], "text": path["text"]}
+        paths = sorted(best.values(), key=lambda x: (x["hops"], x["target"]))[:4]
+    return {"found": bool(rows), "algorithm": algorithm, "top_asset_paths": paths,
             "assets": [{"id": r[0], "score": round(float(r[1]), 4), "downstream_models": r[2],
                         "dashboards": r[3], "owner_team": r[4]} for r in rows]}
 
