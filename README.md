@@ -57,11 +57,32 @@ pytest -q                                       # tool tests against a throwaway
 
 ### LLM mode
 
+Tested with xAI Grok (`grok-4.3`, the default when `XAI_API_KEY` is set; override with `LLM_MODEL`).
 `lineagegate ask` runs a small tool-calling loop when an OpenAI-compatible key is configured
 (`XAI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `LLM_BASE_URL` + `LLM_API_KEY`; see
 `.env.example`). The model picks among the graph tools and is instructed to cite the returned paths.
 With no key, a deterministic offline router chooses the tool from the question and renders a templated
-answer, so the demo always runs end to end against FalkorDB.
+answer, so the demo always runs end to end against FalkorDB. API errors also fall back to offline.
+
+```text
+$ lineagegate ask --show-tools "Last night a customer job failed. What happened, have we seen it before, and who should I page?"
+[mode: llm:xai:grok-4.3]
+[tool] triage_failed_job({})
+Job dbt_mart_customers_daily failed on unique_mart_customers_customer_id (37 duplicate customer_id rows); matches INC-0917/INC-0916.
+- Seen before: (Job dbt_mart_customers_daily) <-[:TRIGGERED_BY]- (Incident INC-0917) -[:RELATED_TO]-> (Incident INC-0916)
+- Page: Jules Chen (Customer Analytics on-call).
+```
+
+### HTTP API
+
+```bash
+pip install -e '.[api]' && lineagegate serve      # http://127.0.0.1:8000/docs
+curl localhost:8000/health
+curl 'localhost:8000/impact?column=stg_orders.amount'
+curl -XPOST localhost:8000/chat -H 'content-type: application/json' -d '{"question":"Why did dbt_mart_customers_daily fail?"}'
+```
+
+Also `/triage?job=`, `/incidents?node=&text=`, `/critical?algorithm=pagerank|betweenness`.
 
 ## How it works
 
@@ -76,6 +97,10 @@ question ─► agent loop ─► tool (Cypher template) ─► FalkorDB graph "
 | `impact_from_column(table, column)` | Column-level downstream blast radius: models, dashboards, jobs, contracts, tests, owner teams, plus the shortest path to each impacted asset | variable-length `DEPENDS_ON*0..8` + fixed hops, path projection |
 | `owners_for_node(node)` | Owning team/person (inherited through `HAS_COLUMN`), members, on-call | multi-hop `OWNED_BY` / `MEMBER_OF` |
 | `paths_explain(source, target)` | k shortest connections between any two nodes, with edge directions | `algo.SPpaths` (fallback `shortestPath`) |
+| `triage_failed_job(job?)` | Failed job → failing tests, upstream models + ingestion paths, contracts, dashboards at risk, on-call, similar past incidents | `REFRESHES`/`DEPENDS_ON*`/`READS_FROM`/`WRITES_TO` path patterns |
+| `similar_incidents(node?, text?)` | Recall past incidents ranked by graph distance + keyword overlap, with the connecting path | `shortestPath` over lineage edges |
+| `record_incident(...)` | Persist an incident linked to job/contracts and `RELATED_TO` similar ones: memory that survives across sessions | `MERGE` writes |
+| `critical_assets(algorithm)` | Most structurally critical models with downstream reach + owner | `algo.pageRank`, `algo.betweenness` |
 
 * Data model and scenarios: [`docs/data-model.md`](docs/data-model.md)
 * Cypher used by each tool: [`docs/cypher.md`](docs/cypher.md)
@@ -90,7 +115,9 @@ src/lineagegate/
   seed/generate.py        dataset spec -> data/*.csv  (lineagegate generate)
   seed/load.py            data/*.csv -> FalkorDB graph (lineagegate seed)
   graph/client.py         connection, node resolution, path rendering
-  tools/lineage.py        Cypher-backed agent tools + tool specs
+  tools/lineage.py        impact / owners / paths tools + tool specs
+  tools/ops.py            triage / incident memory / critical-asset tools
+  api/app.py              FastAPI: /health /impact /chat /triage /incidents /critical
   agent/loop.py           LLM tool-calling loop + offline router
   cli.py                  command line
 tests/                    tool tests against the seed
@@ -100,8 +127,8 @@ docs/                     data model, Cypher, demo script
 ## Status
 
 - [x] Day 1: FalkorDB + seed + 3 tools + CLI impact answer with paths
-- [ ] Failed-job triage, similar incidents (cross-session memory), critical assets (PageRank)
-- [ ] HTTP API + minimal UI with evidence panel
+- [x] Day 2: real LLM tool-calling (xAI Grok), failed-job triage, incident memory, critical assets, FastAPI
+- [ ] Minimal UI with evidence panel
 - [ ] Hosted demo + video
 
 ## License

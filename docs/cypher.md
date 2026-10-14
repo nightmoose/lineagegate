@@ -52,8 +52,33 @@ RETURN length(p) AS hops, pnodes, prels ORDER BY hops
 
 Fallback: `RETURN shortestPath((a)-[*..8]-(b))`.
 
-## Planned (Day 2+)
+## triage_failed_job(job)
 
-- `triage_failed_job(job)`: failed job → refreshed models → upstream contracts/tests → related incidents.
-- `similar_incidents(...)`: incidents sharing violated contracts / triggering jobs (`RELATED_TO` memory).
-- `critical_assets()`: `algo.pageRank` / betweenness over lineage edges.
+```cypher
+MATCH (:Job {id:$id})-[:REFRESHES]->(m:Model)
+MATCH (t:Test)-[:READS_FROM]->(x) WHERE x = m OR (m)-[:HAS_COLUMN]->(x)   // failing tests
+MATCH p = (:Job {id:$id})-[:REFRESHES]->(:Model)-[:DEPENDS_ON*0..8]->(:Model)
+          -[:READS_FROM]->(:Table)<-[:WRITES_TO]-(uj:Job)                 // upstream ingestion paths
+```
+Plus upstream contracts (`GOVERNED_BY`), downstream dashboards (`<-[:DEPENDS_ON*0..8]-()<-[:DISPLAYS]-`),
+owner/on-call, and `similar_incidents` anchored on the job.
+
+## similar_incidents(node, text)
+
+```cypher
+MATCH (a {id:$id}), (i:Incident) WHERE i <> a
+WITH i, shortestPath((a)-[:DEPENDS_ON|READS_FROM|WRITES_TO|REFRESHES|HAS_COLUMN|GOVERNED_BY|
+                          TRIGGERED_BY|VIOLATED|RELATED_TO|DISPLAYS*1..6]-(i)) AS p
+WHERE p IS NOT NULL RETURN i.id, length(p), ...
+```
+Score = 1/hops + keyword overlap with `text`. Ownership edges are excluded so team membership does not
+make everything look related. `record_incident` `MERGE`s new `Incident` nodes with `TRIGGERED_BY`,
+`VIOLATED`, and `RELATED_TO` edges, so memory persists in FalkorDB across sessions.
+
+## critical_assets(algorithm)
+
+```cypher
+CALL algo.pageRank('Model','DEPENDS_ON') YIELD node, score
+// or: CALL algo.betweenness({nodeLabels:['Model'], relationshipTypes:['DEPENDS_ON']}) YIELD node, score
+```
+On the seed both rank `dim_customer` first (the planted hub).
