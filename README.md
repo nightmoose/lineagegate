@@ -91,6 +91,21 @@ curl -XPOST localhost:8000/chat -H 'content-type: application/json' -d '{"questi
 
 Also `/triage?job=`, `/incidents?node=&text=`, `/critical?algorithm=pagerank|betweenness`.
 
+## Deploy (Fly.io)
+
+Live demo: **https://lineagegate.fly.dev/**
+
+One image (`Dockerfile`) runs FalkorDB on `127.0.0.1` plus the FastAPI app, so the database always
+starts with the web app (no cross-app wake-up issues). `deploy/start.sh` seeds the `acme` graph on boot
+if it is missing or empty, so a restart heals itself. No volume: graph state, including recorded
+incidents, resets to the seed on restart.
+
+```bash
+fly apps create lineagegate
+fly secrets set XAI_API_KEY=...        # optional; without it /chat uses the offline router
+fly deploy --ha=false                  # fly.toml: iad, shared-cpu-1x 512MB, auto stop/start
+```
+
 ## How it works
 
 ```
@@ -116,7 +131,8 @@ question ─► agent loop ─► tool (Cypher template) ─► FalkorDB graph "
 ## Repo layout
 
 ```
-docker-compose.yml        FalkorDB (server + Browser)
+docker-compose.yml        FalkorDB (server + Browser) for local dev
+Dockerfile, fly.toml      single-machine Fly deploy (FalkorDB + app); deploy/start.sh
 data/                     synthetic seed as CSV (nodes_*.csv, edges_*.csv, incidents.json)
 src/lineagegate/
   seed/generate.py        dataset spec -> data/*.csv  (lineagegate generate)
@@ -137,7 +153,8 @@ docs/                     data model, Cypher, demo script
 - [x] Day 1: FalkorDB + seed + 3 tools + CLI impact answer with paths
 - [x] Day 2: real LLM tool-calling (xAI Grok), failed-job triage, incident memory, critical assets, FastAPI
 - [x] Web UI with chat + evidence panel (path list + graph view)
-- [ ] Hosted demo + video
+- [x] Hosted demo on Fly.io
+- [ ] Video
 
 ## License
 
