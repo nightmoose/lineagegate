@@ -73,6 +73,13 @@ Job dbt_mart_customers_daily failed on unique_mart_customers_customer_id (37 dup
 - Page: Jules Chen (Customer Analytics on-call).
 ```
 
+### Web UI
+
+`lineagegate serve` then open http://127.0.0.1:8000/ : chat on the left; on the right, the tools the agent
+called, every graph path in the result (click one to highlight it), and a vis-network view of the paths.
+
+![LineageGate UI](docs/ui.png)
+
 ### HTTP API
 
 ```bash
@@ -117,6 +124,7 @@ src/lineagegate/
   graph/client.py         connection, node resolution, path rendering
   tools/lineage.py        impact / owners / paths tools + tool specs
   tools/ops.py            triage / incident memory / critical-asset tools
+  api/static/index.html   single-file UI (vanilla JS + vis-network from CDN)
   api/app.py              FastAPI: /health /impact /chat /triage /incidents /critical
   agent/loop.py           LLM tool-calling loop + offline router
   cli.py                  command line
@@ -128,7 +136,7 @@ docs/                     data model, Cypher, demo script
 
 - [x] Day 1: FalkorDB + seed + 3 tools + CLI impact answer with paths
 - [x] Day 2: real LLM tool-calling (xAI Grok), failed-job triage, incident memory, critical assets, FastAPI
-- [ ] Minimal UI with evidence panel
+- [x] Web UI with chat + evidence panel (path list + graph view)
 - [ ] Hosted demo + video
 
 ## License

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LineageGate</title>
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<style>
+:root{--bg:#0f1420;--panel:#161d2c;--line:#263043;--text:#e6ebf5;--mut:#8b97ad;--acc:#4f8cff;--hl:#ffb547}
+*{box-sizing:border-box}body{margin:0;font:14px/1.5 Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column}
+header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:14px}
+header h1{margin:0;font-size:20px;letter-spacing:.3px}header h1 span{color:var(--acc)}header p{margin:0;color:var(--mut)}
+#mode{margin-left:auto;font-size:12px;color:var(--mut)}
+main{flex:1;display:grid;grid-template-columns:minmax(360px,1fr) minmax(420px,1.2fr);gap:14px;padding:14px;min-height:0}
+section{background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;min-height:0}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--mut);margin:0;padding:12px 16px;border-bottom:1px solid var(--line)}
+#msgs{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+.m{padding:10px 14px;border-radius:10px;max-width:92%;white-space:pre-wrap;word-wrap:break-word}
+.u{align-self:flex-end;background:var(--acc);color:#fff}.a{background:#1d2638;border:1px solid var(--line)}
+.a code{background:#0c1220;padding:1px 4px;border-radius:4px;color:var(--hl)}
+.samples{display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
+.samples button{background:#1d2638;border:1px solid var(--line);color:var(--text);border-radius:16px;padding:6px 12px;cursor:pointer;font-size:12.5px}
+.samples button:hover{border-color:var(--acc)}
+form{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
+input{flex:1;background:#0c1220;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 12px;font-size:14px}
+form button{background:var(--acc);border:0;color:#fff;border-radius:8px;padding:0 18px;font-weight:600;cursor:pointer}
+#graph{height:46%;min-height:240px;border-bottom:1px solid var(--line);background:#0c1220}
+#ev{flex:1;overflow:auto;padding:12px 16px}
+.tool{border:1px solid var(--line);border-radius:8px;margin-bottom:10px;overflow:hidden}
+.tool .h{padding:8px 12px;background:#1d2638;font-family:ui-monospace,monospace;font-size:12.5px}
+.path{padding:6px 12px;font-family:ui-monospace,monospace;font-size:12px;line-height:1.9;cursor:pointer;border-top:1px solid var(--line)}
+.path:hover,.path.on{background:#1f2a40}
+.n{background:#25324b;border-radius:4px;padding:1px 6px}.e{color:var(--hl)}
+.muted{color:var(--mut)}.spin{color:var(--mut);font-style:italic}
+footer{text-align:center;padding:8px;color:var(--mut);font-size:12px;border-top:1px solid var(--line)}
+footer a{color:var(--acc);text-decoration:none}
+</style>
+</head>
+<body>
+<header><h1>Lineage<span>Gate</span></h1><p>Explainable answers from a data lineage + contracts graph</p><div id="mode"></div></header>
+<main>
+<section>
+  <h2>Chat</h2>
+  <div id="msgs"><div class="m a muted">Ask about column impact, failed jobs, past incidents, or critical assets. Every answer cites the graph path behind it.</div></div>
+  <div class="samples">
+    <button>What breaks if stg_orders.amount changes from dollars to cents?</button>
+    <button>Why did dbt_mart_customers_daily fail, and who should I page?</button>
+    <button>Have we seen an incident like this stg_orders.amount problem before?</button>
+    <button>Which model is the most critical in the lineage?</button>
+  </div>
+  <form id="f"><input id="q" placeholder="Ask LineageGate…" autocomplete="off"><button>Ask</button></form>
+</section>
+<section>
+  <h2>Evidence</h2>
+  <div id="graph"></div>
+  <div id="ev" class="muted">Tool calls and graph paths appear here.</div>
+</section>
+</main>
+<footer>Powered by <a href="https://www.falkordb.com/" target="_blank" rel="noopener">FalkorDB</a></footer>
+<script>
+const $=s=>document.querySelector(s), esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const COLORS={Column:'#4f8cff',Model:'#7c5cff',Table:'#2bb3a3',Dashboard:'#ff7a59',Contract:'#ffb547',Job:'#36c26b',Incident:'#ff5470',Test:'#9aa7bd',Team:'#c792ea',Person:'#c792ea',Source:'#2bb3a3'};
+const TOKEN=/\((\w+) ([^)]+)\)|(<-\[:(\w+)\]-|-\[:(\w+)\]->)/g;
+function parsePath(t){const nodes=[],edges=[];let m,pend=null;TOKEN.lastIndex=0;
+  while((m=TOKEN.exec(t))){if(m[1]){const id=m[1]+' '+m[2];nodes.push({id,label:m[1],name:m[2]});
+    if(pend){const prev=nodes[nodes.length-2].id;edges.push(pend.dir>0?{from:prev,to:id,type:pend.type}:{from:id,to:prev,type:pend.type});pend=null}}
+    else pend={type:m[4]||m[5],dir:m[5]?1:-1}}
+  return {nodes,edges}}
+function findPaths(o,out=[]){if(typeof o==='string'){if(/^\(\w+ [^)]+\) (<-|-)\[:/.test(o))out.push(o)}
+  else if(Array.isArray(o))o.forEach(x=>findPaths(x,out));else if(o&&typeof o==='object')Object.values(o).forEach(x=>findPaths(x,out));return [...new Set(out)]}
+function pathHtml(t){return esc(t).replace(/\((\w+) ([^)]+)\)/g,'<span class="n">$1 <b>$2</b></span>').replace(/(&lt;-\[:\w+\]-|-\[:\w+\]-&gt;)/g,'<span class="e">$1</span>')}
+let net=null;
+function draw(paths,hi){const N=new Map(),E=new Map(),hiP=hi!=null?parsePath(paths[hi]):null,hiN=new Set(hiP?hiP.nodes.map(n=>n.id):[]),hiE=new Set(hiP?hiP.edges.map(e=>e.from+e.type+e.to):[]);
+  paths.forEach(p=>{const g=parsePath(p);g.nodes.forEach(n=>N.set(n.id,n));g.edges.forEach(e=>E.set(e.from+e.type+e.to,e))});
+  const on=id=>hi==null||hiN.has(id);
+  const nodes=[...N.values()].map(n=>({id:n.id,label:n.name+'\n'+n.label,shape:'box',color:{background:on(n.id)?COLORS[n.label]||'#888':'#2a3346',border:on(n.id)&&hi!=null?'#fff':'#0000'},font:{color:on(n.id)?'#fff':'#6b778d',size:12,multi:false},borderWidth:hi!=null&&on(n.id)?2:0,margin:8}));
+  const edges=[...E.entries()].map(([k,e])=>({from:e.from,to:e.to,label:e.type,arrows:'to',font:{color:'#8b97ad',size:10,strokeWidth:0},color:{color:hi==null||hiE.has(k)?'#ffb547':'#33405a'},width:hi==null||hiE.has(k)?2:1}));
+  const data={nodes:new vis.DataSet(nodes),edges:new vis.DataSet(edges)};
+  const opts={layout:{hierarchical:{direction:'LR',sortMethod:'directed',levelSeparation:170,nodeSpacing:70}},physics:false,interaction:{hover:true}};
+  if(net)net.destroy();net=new vis.Network($('#graph'),data,opts)}
+function renderEvidence(calls){const ev=$('#ev');ev.classList.remove('muted');let all=[];
+  if(!calls.length){ev.innerHTML='<span class="muted">No tool calls.</span>';if(net)net.destroy();return}
+  ev.innerHTML=calls.map(c=>{const ps=findPaths(c.result).slice(0,8);const start=all.length;all.push(...ps);
+    return `<div class="tool"><div class="h">🔧 ${esc(c.tool)}(${esc(JSON.stringify(c.args))})</div>`+
+      (ps.length?ps.map((p,i)=>`<div class="path" data-i="${start+i}">${pathHtml(p)}</div>`).join(''):'<div class="path muted">no path in result (algorithm scores)</div>')+'</div>'}).join('');
+  ev.querySelectorAll('.path[data-i]').forEach(el=>el.onclick=()=>{ev.querySelectorAll('.path').forEach(x=>x.classList.remove('on'));el.classList.add('on');draw(all,+el.dataset.i)});
+  if(all.length){draw(all,0);ev.querySelector('.path[data-i="0"]').classList.add('on')}}
+function md(s){return esc(s).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>')}
+function add(cls,html){const d=document.createElement('div');d.className='m '+cls;d.innerHTML=html;$('#msgs').append(d);$('#msgs').scrollTop=1e9;return d}
+async function ask(q){if(!q.trim())return;add('u',esc(q));const w=add('a spin','Querying the graph…');
+  try{const r=await fetch('chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:q})});
+    const j=await r.json();w.classList.remove('spin');w.innerHTML=md(j.answer||JSON.stringify(j));$('#mode').textContent='mode: '+j.mode;renderEvidence(j.tool_calls||[])}
+  catch(e){w.textContent='Error: '+e}}
+$('#f').onsubmit=e=>{e.preventDefault();ask($('#q').value);$('#q').value=''};
+document.querySelectorAll('.samples button').forEach(b=>b.onclick=()=>ask(b.textContent));
+</script>
+</body></html>

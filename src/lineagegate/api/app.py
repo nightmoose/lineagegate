@@ -4,7 +4,10 @@ Run: uvicorn lineagegate.api.app:app --reload
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from lineagegate import config
@@ -61,3 +64,11 @@ def incidents(node: str | None = None, text: str | None = None, k: int = 5) -> d
 @app.get("/critical")
 def critical(algorithm: str = "pagerank", k: int = 5) -> dict:
     return critical_assets(algorithm, k)
+
+
+STATIC = Path(__file__).parent / "static"
+
+
+@app.get("/", include_in_schema=False)
+def ui() -> FileResponse:
+    return FileResponse(STATIC / "index.html")
