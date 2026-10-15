@@ -32,7 +32,8 @@ Rules:
   evidence for it, offer any did_you_mean / candidates, and STOP. Never invent tables, columns,
   dashboards, owners, or paths that no tool returned.
 - If a name is ambiguous, list the candidates and ask which one; do not pick silently.
-Keep answers short: a 1-2 sentence verdict, then bullets."""
+Keep answers short: a 1-2 sentence verdict, then bullets. Write for humans: never echo raw JSON,
+field names (found, did_you_mean, candidates) or ids with prefixes unless quoting a path."""
 
 
 @dataclass

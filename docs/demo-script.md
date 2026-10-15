@@ -1,19 +1,37 @@
-# Demo script (one take, ~80 seconds)
+# Demo script: one take, ~80 seconds
 
-**Setup before recording:** open https://lineagegate.fly.dev/ in a fresh tab and reload once so the
-machine is awake (first wake takes a few seconds). Browser at ~1440×900, zoom 100%. Have
-https://github.com/nightmoose/lineagegate open in a second tab. Each answer takes ~5–10 s; keep talking
-over the wait.
+Dry-run against https://lineagegate.fly.dev on Oct 15, 2026 (headless Chrome, 1440×900):
 
-| Time | Do exactly this | Say |
+- **Cold start:** the first request takes about 4 s while the Fly machine wakes up. After that, requests take about 0.6 s.
+- **Answer times:** impact 6–15 s (the 15 s was an outlier), triage 7 s, memory 6–8 s, critical 4–5 s, unknown column 5–6 s.
+- **While waiting:** the chat shows a live seconds counter. After 3 s it switches to "Querying FalkorDB and writing the answer". Narrate over the wait; never cut.
+
+## Before recording (checklist)
+
+1. **Wake the machine:** open https://lineagegate.fly.dev/health and wait for `"status":"ok"` with `"nodes":111`.
+   If it was idle, the first load takes about 4 s.
+2. **Open the app:** go to https://lineagegate.fly.dev/ in a **fresh** tab, so the chat is empty and the header has no `agent:` tag yet.
+3. **Window:** browser window at **1440×900** (or full screen at 1080p), zoom **100%**, bookmarks bar hidden,
+   no other tabs visible except the GitHub repo (https://github.com/nightmoose/lineagegate) to the right.
+4. **Mouse:** after each click, move the mouse off the sample buttons so the hover outline doesn't linger.
+5. **Optional warm-up:** if Grok seems slow today, ask one question in another tab first. Each tab has its own chat, so the recording tab stays clean.
+6. Start the recording on the empty LineageGate page.
+
+## Script
+
+| Time | Click / type exactly | Say exactly |
 |---|---|---|
-| 0:00–0:10 | Show the LineageGate page, empty chat. | "This is LineageGate, an agent that answers data-reliability questions from a lineage and contracts graph in FalkorDB. Every answer comes with the graph path behind it." |
-| 0:10–0:28 | Click sample 1: **"What breaks if stg_orders.amount changes from dollars to cents?"** When it answers, point at the 🔧 `impact_from_column` card, then the highlighted graph. | "Grok picked the impact tool by itself. FalkorDB walks column-level lineage: five dashboards at risk, the orders_amount contract that says dollars not cents, and Finance Analytics to notify. Here's the exact path from the column to the revenue dashboard." |
-| 0:28–0:46 | Click sample 2: **"Why did dbt_mart_customers_daily fail, and who should I page?"** Click the path row ending in `Job ingest_crm`. | "A job failed last night. Triage follows refresh, dependency and ingestion edges upstream: duplicate customer IDs, the dim_customer grain contract, and Jules Chen on call. Click any path to highlight it." |
-| 0:46–1:02 | Click sample 3: **"Have we seen an incident like this stg_orders.amount problem before?"** Point at the `VIOLATED` path to INC-0802. | "This is the memory part. Incidents live in the graph, so a new session recalls INC-0802, the same cents-versus-dollars bug from August, with its fix. It's linked through the contract it violated." |
-| 1:02–1:14 | Click sample 4: **"Which model is the most critical in the lineage?"** | "FalkorDB's built-in PageRank ranks dim_customer as the hub, and the evidence shows every dashboard that depends on it." |
-| 1:14–1:22 | Type **"What breaks if stg_orders.amount_eur changes?"** and press Enter. | "And when the graph has no evidence, it says so and suggests close matches instead of guessing." |
-| 1:22–1:30 | Switch to the GitHub tab. | "Track 01, with incident memory for Track 02. Open source, synthetic data, live on Fly.io. Powered by FalkorDB." |
+| 0:00–0:08 | Nothing. Empty page. | "This is LineageGate: an AI agent that answers data-reliability questions from a lineage graph in FalkorDB, and shows the graph path behind every answer." |
+| 0:08–0:26 | Click sample **"What breaks if stg_orders.amount changes from dollars to cents?"** While it loads, keep talking. When the answer lands, point at the 🔧 `impact_from_column` card, then the orange path in the graph. | "Someone wants to switch order amounts from dollars to cents. Grok picks the impact tool on its own, and FalkorDB walks column-level lineage. It breaks the orders-amount contract and hits five dashboards, including daily revenue. Here's the exact path." |
+| 0:26–0:44 | Click sample **"Why did dbt_mart_customers_daily fail, and who should I page?"** When it lands, click the second path row (ends in **Job ingest_crm**). | "A job failed overnight. Triage walks upstream from the failed job: 37 duplicate customer IDs, the customer-grain contract, and Jules Chen is on call. Click any path to highlight it." |
+| 0:44–1:00 | Click sample **"Have we seen an incident like this stg_orders.amount problem before?"** Point at the first path (ends in **Incident INC-0802**). | "Incidents are stored in the graph, so memory carries across sessions. It finds INC-0802, the same cents-versus-dollars bug from August, with its fix, linked through the contract it violated." |
+| 1:00–1:12 | Click sample **"Which model is the most critical in the lineage?"** | "FalkorDB's built-in PageRank finds the hub, dim_customer, and the graph shows every dashboard that depends on it." |
+| 1:12–1:22 | Click the input, type **`What breaks if stg_orders.amount_eur changes?`**, press **Enter**. Point at "⚠ No graph evidence". | "And when the graph has no evidence, it says so and suggests real columns. No guessing." |
+| 1:22–1:30 | Click **Data model** tab for two seconds, then switch to the GitHub tab. | "Eleven node types, twelve relationships, all live from FalkorDB. Open source on GitHub, running on Fly.io." |
 
-**If an answer is slow:** keep narrating the previous evidence panel; don't cut.
-**Fallback:** if the LLM is unavailable, answers still come back in `offline-router` mode with the same tools and paths.
+## If something goes wrong
+
+- **An answer takes more than 10 s:** keep describing the previous evidence panel, and don't cut.
+- **Error or `agent: offline router` in the header:** the LLM was unreachable, but answers still come from the same graph tools with
+  the same paths. Keep going and mention "offline mode" once.
+- **A path row isn't where the script says:** click whichever row ends in the named node.

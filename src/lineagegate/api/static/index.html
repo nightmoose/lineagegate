@@ -36,6 +36,10 @@ div.vis-tooltip{background:#1d2638;color:#e6ebf5;border:1px solid #33405a;font:1
 .n{background:#25324b;border-radius:4px;padding:1px 6px}.e{color:var(--hl)}
 .muted{color:var(--mut)}.spin{color:var(--mut);font-style:italic}
 .tabs{display:flex;gap:18px}.tab{cursor:pointer}.tab.on{color:var(--text);border-bottom:2px solid var(--acc);padding-bottom:2px}
+.dots::after{content:'';animation:dots 1.2s steps(4) infinite}@keyframes dots{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}}
+.secs{color:var(--mut);font-size:12px;margin-left:4px}.spin{border-color:var(--acc)!important}
+body.busy .samples button,body.busy form button{opacity:.5;pointer-events:none}
+.path.nf{color:#ffd28a}.sug{margin-top:4px;color:var(--mut)}.gempty{display:flex;height:100%;align-items:center;justify-content:center;color:var(--mut);font-size:13px}
 footer{text-align:center;padding:8px;color:var(--mut);font-size:12px;border-top:1px solid var(--line)}
 footer a{color:var(--acc);text-decoration:none}
 </style>
@@ -45,7 +49,7 @@ footer a{color:var(--acc);text-decoration:none}
 <main>
 <section>
   <h2>Chat</h2>
-  <div id="msgs"><div class="m a muted">Ask about column impact, failed jobs, past incidents, or critical assets. Every answer cites the graph path behind it.</div></div>
+  <div id="msgs"><div class="m a muted">Ask about column impact, failed jobs, past incidents, or critical assets. Grok picks a graph tool, FalkorDB walks the lineage, and every answer cites the path behind it.</div></div>
   <div class="samples">
     <button>What breaks if stg_orders.amount changes from dollars to cents?</button>
     <button>Why did dbt_mart_customers_daily fail, and who should I page?</button>
@@ -88,22 +92,35 @@ var draw=function(paths,hi){
     color:{color:h?'#ffb547':'#4a5875',hover:'#ffd28a',highlight:'#ffb547'},width:h?2.5:1.2,smooth:false}});
   const opts={layout:{hierarchical:{direction:'LR',sortMethod:'directed',levelSeparation:200,nodeSpacing:70,treeSpacing:90,blockShifting:true,edgeMinimization:true,parentCentralization:true}},
     physics:false,interaction:{hover:true,tooltipDelay:120,navigationButtons:false,keyboard:false}};
-  if(net)net.destroy();net=new vis.Network($('#graph'),{nodes:new vis.DataSet(nodes),edges:new vis.DataSet(edges)},opts);
+  if(net)net.destroy();$('#graph').innerHTML='';net=new vis.Network($('#graph'),{nodes:new vis.DataSet(nodes),edges:new vis.DataSet(edges)},opts);
   net.once('afterDrawing',()=>{net.fit({nodes:hiN.size?[...hiN]:undefined,animation:false});
     if(net.getScale()<0.75)net.moveTo({scale:0.75,position:hiN.size?net.getViewPosition():undefined})})};
 function renderEvidence(calls){const ev=$('#ev');ev.classList.remove('muted');let all=[];
-  if(!calls.length){ev.innerHTML='<span class="muted">No tool calls.</span>';if(net)net.destroy();return}
-  ev.innerHTML=calls.map(c=>{const ps=findPaths(c.result).slice(0,8);const start=all.length;all.push(...ps);
-    return `<div class="tool"><div class="h">🔧 ${esc(c.tool)}(${esc(JSON.stringify(c.args))})</div>`+
-      (ps.length?ps.map((p,i)=>`<div class="path" data-i="${start+i}">${pathHtml(p)}</div>`).join(''):'<div class="path muted">no path in result (algorithm scores)</div>')+'</div>'}).join('');
+  if(!calls.length){ev.innerHTML='<span class="muted">The agent answered without calling a graph tool.</span>';clearGraph('No tool was called');return}
+  ev.innerHTML=calls.map(c=>{const r=c.result||{},ps=findPaths(r).slice(0,8);const start=all.length;all.push(...ps);
+    let body;
+    if(ps.length) body=ps.map((p,i)=>`<div class="path" data-i="${start+i}">${pathHtml(p)}</div>`).join('');
+    else if(r.found===false){const sug=r.did_you_mean||r.candidates||[];
+      body=`<div class="path nf">⚠ No graph evidence: ${esc(r.error||'not found')}`+(sug.length?`<div class="sug">Did you mean: ${sug.slice(0,5).map(x=>`<span class="n">${esc(x)}</span>`).join(' ')}</div>`:'')+'</div>'}
+    else body='<div class="path muted">No path in this result (ranking scores only).</div>';
+    return `<div class="tool"><div class="h">🔧 ${esc(c.tool)}(${esc(JSON.stringify(c.args))})</div>${body}</div>`}).join('');
   ev.querySelectorAll('.path[data-i]').forEach(el=>el.onclick=()=>{ev.querySelectorAll('.path').forEach(x=>x.classList.remove('on'));el.classList.add('on');draw(all,+el.dataset.i)});
-  if(all.length){draw(all,0);ev.querySelector('.path[data-i="0"]').classList.add('on')}}
+  if(all.length){draw(all,0);ev.querySelector('.path[data-i="0"]').classList.add('on')}else clearGraph('No path found, so nothing to draw')}
+function clearGraph(msg){if(net){net.destroy();net=null}lastDraw=null;$('#graph').innerHTML=`<div class="gempty">${esc(msg)}</div>`}
 function md(s){return esc(s).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>')}
 function add(cls,html){const d=document.createElement('div');d.className='m '+cls;d.innerHTML=html;$('#msgs').append(d);$('#msgs').scrollTop=1e9;return d}
-async function ask(q){if(!q.trim())return;add('u',esc(q));const w=add('a spin','Querying the graph…');
+let busy=false;
+async function ask(q){if(!q.trim()||busy)return;busy=true;document.body.classList.add('busy');add('u',esc(q));
+  const w=add('a spin','<span class="dots">Grok is choosing a graph tool</span> <span class="secs">0s</span>');const t0=Date.now();
+  const tick=setInterval(()=>{const s=Math.round((Date.now()-t0)/1000);w.querySelector('.secs').textContent=s+'s';if(s>=3)w.querySelector('.dots').textContent='Querying FalkorDB and writing the answer'},500);
+  $('#ev').innerHTML='<span class="muted">Waiting for tool calls…</span>';
   try{const r=await fetch('chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:q})});
-    const j=await r.json();w.classList.remove('spin');w.innerHTML=md(j.answer||JSON.stringify(j));$('#mode').textContent='mode: '+j.mode;if(tab!=='ev')document.querySelector('.tab[data-t=ev]').click();renderEvidence(j.tool_calls||[])}
-  catch(e){w.textContent='Error: '+e}}
+    const j=await r.json();clearInterval(tick);w.classList.remove('spin');w.innerHTML=md(j.answer||JSON.stringify(j));
+    $('#mode').textContent=(j.mode||'').startsWith('llm:')?'agent: '+j.mode.split(':').pop():'agent: offline router';
+    if(tab!=='ev')document.querySelector('.tab[data-t=ev]').click();renderEvidence(j.tool_calls||[])}
+  catch(e){w.classList.remove('spin');w.textContent='Error: '+e}
+  finally{clearInterval(tick);busy=false;document.body.classList.remove('busy');if(document.activeElement)document.activeElement.blur();
+    w.scrollIntoView({block:'start',behavior:'smooth'})}}
 $('#f').onsubmit=e=>{e.preventDefault();ask($('#q').value);$('#q').value=''};
 let lastDraw=null,tab='ev';
 const _draw=draw;draw=(p,h)=>{lastDraw=[p,h];if(tab==='ev')_draw(p,h)};
@@ -117,7 +134,7 @@ async function showSchema(){const j=await (await fetch('schema')).json();
         return {from:p.from,to:p.to,label:(self||p.type==='OWNED_BY'||p.type==='MEMBER_OF')?undefined:`${p.type} ·${p.count}`,title:`${p.from} -[:${p.type}]-> ${p.to} (${p.count})`,arrows:{to:{scaleFactor:.6}},
       font:{color:'#e9edf5',size:11,align:'middle',strokeWidth:0,background:'#0c1220e6'},color:{color:p.type==='OWNED_BY'||p.type==='MEMBER_OF'?'#6c7a96':'#ffb547',highlight:'#fff',hover:'#fff'},
       width:1.4,selfReference:{size:40,renderBehindTheNode:false,angle:({Model:Math.PI,Column:Math.PI*0.6})[p.from]??Math.PI/4},smooth:self?undefined:{type:n%2?'curvedCW':'curvedCCW',roundness:0.12+0.12*Math.floor((n-1)/2)}}});
-  if(net)net.destroy();net=new vis.Network($('#graph'),{nodes:new vis.DataSet(nodes),edges:new vis.DataSet(edges)},{physics:false,interaction:{hover:true,tooltipDelay:120,dragNodes:true}});
+  if(net)net.destroy();$('#graph').innerHTML='';net=new vis.Network($('#graph'),{nodes:new vis.DataSet(nodes),edges:new vis.DataSet(edges)},{physics:false,interaction:{hover:true,tooltipDelay:120,dragNodes:true}});
   net.once('afterDrawing',()=>net.fit({animation:false}));
   $('#schemaInfo').innerHTML=`Live schema from FalkorDB (hover an edge for details; ownership edges are grey): <b>${j.labels.length}</b> labels, <b>${j.relationship_types.length}</b> relationship types, ${j.pairs.reduce((a,p)=>a+p.count,0)} edges.<br><br>`+
     j.pairs.map(p=>`<div class="path"><span class="n">${esc(p.from)}</span> <span class="e">-[:${esc(p.type)}]-&gt;</span> <span class="n">${esc(p.to)}</span> <span class="muted">× ${p.count}</span></div>`).join('')}
