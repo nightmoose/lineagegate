@@ -17,7 +17,7 @@ from lineagegate.tools import lineage, ops
 
 TOOLS = {**lineage.TOOLS, **ops.TOOLS}
 TOOL_SPECS = lineage.TOOL_SPECS + ops.TOOL_SPECS
-DEFAULT_XAI_MODEL = "grok-4.3"  # tool-calling capable; override with LLM_MODEL
+DEFAULT_XAI_MODEL = "grok-4.20-0309-non-reasoning"  # fast tool calling; override with LLM_MODEL (e.g. grok-4.3)
 
 SYSTEM_PROMPT = """You are LineageGate, a data-reliability assistant for the Acme Analytics warehouse.
 You answer ONLY from the lineage + contracts graph stored in FalkorDB, using the tools provided.

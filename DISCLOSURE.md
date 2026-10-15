@@ -14,7 +14,7 @@ review are the author's.
 
 ## Runtime AI use
 
-- The deployed agent calls **xAI Grok (`grok-4.3`)** through its OpenAI-compatible API for tool
+- The deployed agent calls **xAI Grok (`grok-4.20-0309-non-reasoning`; `grok-4.3` also tested)** through its OpenAI-compatible API for tool
   selection and answer wording. All facts come from FalkorDB tool results.
 - Without an API key, a deterministic offline router answers instead (no LLM involved).
 

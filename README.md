@@ -144,7 +144,7 @@ pytest -q                                       # tool tests against a throwaway
 
 ### LLM mode
 
-Tested with xAI Grok (`grok-4.3`, the default when `XAI_API_KEY` is set; override with `LLM_MODEL`).
+Tested with xAI Grok: `grok-4.20-0309-non-reasoning` is the default when `XAI_API_KEY` is set (about 2x faster than `grok-4.3`, which also works). Override with `LLM_MODEL`.
 `lineagegate ask` runs a small tool-calling loop when an OpenAI-compatible key is configured
 (`XAI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `LLM_BASE_URL` + `LLM_API_KEY`; see
 `.env.example`). The model picks among the graph tools and is instructed to cite the returned paths.

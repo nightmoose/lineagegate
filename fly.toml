@@ -8,7 +8,7 @@ primary_region = "iad"
 
 [env]
   LINEAGEGATE_GRAPH = "acme"
-  LLM_MODEL = "grok-4.3"
+  LLM_MODEL = "grok-4.20-0309-non-reasoning"  # ~2x faster than grok-4.3 for the demo
 
 [http_service]
   internal_port = 8080
