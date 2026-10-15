@@ -3,7 +3,8 @@
 Dry-run against https://lineagegate.fly.dev on Oct 15, 2026 (headless Chrome, 1440×900):
 
 - **Cold start:** the first request takes about 4 s while the Fly machine wakes up. After that, requests take about 0.6 s.
-- **Answer times:** impact 6–15 s (the 15 s was an outlier), triage 7 s, memory 6–8 s, critical 4–5 s, unknown column 5–6 s.
+- **Answer times** with `grok-4.20-0309-non-reasoning` (the deployed default): impact 6.4 s, triage 3.7 s, memory 3.8 s,
+  critical 3.6 s, unknown column 3.6 s. With `grok-4.3`, the same questions took 5–26 s, which is why I switched the default.
 - **While waiting:** the chat shows a live seconds counter. After 3 s it switches to "Querying FalkorDB and writing the answer". Narrate over the wait; never cut.
 
 ## Before recording (checklist)
